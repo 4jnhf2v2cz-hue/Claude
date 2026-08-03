@@ -6,12 +6,15 @@ import { MockVideoGenerator } from "../providers/videoGen/mock.js";
 import { pathsFor } from "./paths.js";
 
 export function getVideoGenerator(forceMock: boolean): VideoGenerator {
-  const apiKey = process.env.HIGGSFIELD_API_KEY;
-  const baseUrl = process.env.HIGGSFIELD_BASE_URL ?? "https://api.higgsfield.ai/v1";
-  if (!forceMock && apiKey) {
-    return new HiggsfieldVideoGenerator(apiKey, baseUrl);
+  const keyId = process.env.HIGGSFIELD_KEY_ID;
+  const keySecret = process.env.HIGGSFIELD_KEY_SECRET;
+  const endpoint = process.env.HIGGSFIELD_ENDPOINT ?? "/v1/image2video/dop";
+  if (!forceMock && keyId && keySecret) {
+    return new HiggsfieldVideoGenerator(keyId, keySecret, endpoint);
   }
-  console.log("[video] No HIGGSFIELD_API_KEY (or --dry-run) — using mock placeholder clips");
+  console.log(
+    "[video] No HIGGSFIELD_KEY_ID/HIGGSFIELD_KEY_SECRET (or --dry-run) — using mock placeholder clips"
+  );
   return new MockVideoGenerator();
 }
 

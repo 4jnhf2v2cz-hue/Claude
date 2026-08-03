@@ -1,18 +1,25 @@
 import { writeFile } from "node:fs/promises";
-import {
-  createHiggsfieldClient,
-  SoulQuality,
-  SoulSize,
-  BatchSize,
-  DoPModel,
-} from "@higgsfield/client/v2";
 import { VideoGenerator } from "./types.js";
 
+const BASE_URL = "https://platform.higgsfield.ai";
+const POLL_INTERVAL_MS = 3000;
+const MAX_POLL_MS = 5 * 60 * 1000;
+
+interface V2Response {
+  status: "queued" | "in_progress" | "completed" | "failed" | "nsfw";
+  request_id: string;
+  images?: { url: string }[];
+  video?: { url: string };
+}
+
 /**
- * Real Higgsfield client, built on the official `@higgsfield/client` v2 SDK
- * (verified against the SDK's shipped .d.ts files, not just its README —
- * the README's own example endpoint/response shape didn't match the actual
- * types, so this follows the types).
+ * Real Higgsfield client, calling the live API directly rather than through
+ * `@higgsfield/client`'s v2 `subscribe()` wrapper: that wrapper sends the
+ * input fields flat in the POST body, but the live API rejects that with
+ * `422 body.params: Field required` — the input must be wrapped under a
+ * `params` key. Auth header, base URL, and the polling endpoint below are
+ * taken from the SDK's own source (dist/v2/client.js), which gets those
+ * parts right; only its request-body shape is wrong.
  *
  * Higgsfield's catalog is image-to-video, not pure text-to-video: there is
  * no "type a prompt, get a video" endpoint. So each scene is generated in
@@ -28,10 +35,10 @@ import { VideoGenerator } from "./types.js";
  * defaults below — Higgsfield's catalog can vary by plan.
  */
 export class HiggsfieldVideoGenerator implements VideoGenerator {
-  private client: ReturnType<typeof createHiggsfieldClient>;
+  private authHeader: string;
 
   constructor(keyId: string, keySecret: string, private videoEndpoint: string) {
-    this.client = createHiggsfieldClient({ credentials: `${keyId}:${keySecret}` });
+    this.authHeader = `Key ${keyId}:${keySecret}`;
   }
 
   async generateScene(
@@ -39,14 +46,11 @@ export class HiggsfieldVideoGenerator implements VideoGenerator {
     _durationSeconds: number,
     outPath: string
   ): Promise<void> {
-    const imageResponse = await this.client.subscribe("/v1/text2image/soul", {
-      input: {
-        prompt,
-        width_and_height: SoulSize.LANDSCAPE_2048x1152, // 16:9
-        quality: SoulQuality.HD,
-        batch_size: BatchSize.SINGLE,
-      },
-      withPolling: true,
+    const imageResponse = await this.submitAndPoll("/v1/text2image/soul", {
+      prompt,
+      width_and_height: "2048x1152", // 16:9
+      quality: "1080p",
+      batch_size: 1,
     });
 
     if (imageResponse.status !== "completed") {
@@ -59,13 +63,10 @@ export class HiggsfieldVideoGenerator implements VideoGenerator {
       throw new Error("Higgsfield text-to-image completed but returned no image URL");
     }
 
-    const videoResponse = await this.client.subscribe(this.videoEndpoint, {
-      input: {
-        model: DoPModel.TURBO,
-        prompt,
-        input_images: [{ type: "image_url", image_url: imageUrl }],
-      },
-      withPolling: true,
+    const videoResponse = await this.submitAndPoll(this.videoEndpoint, {
+      model: "dop-turbo",
+      prompt,
+      input_images: [{ type: "image_url", image_url: imageUrl }],
     });
 
     if (videoResponse.status !== "completed") {
@@ -83,5 +84,51 @@ export class HiggsfieldVideoGenerator implements VideoGenerator {
       throw new Error(`Failed to download generated clip: ${res.status}`);
     }
     await writeFile(outPath, Buffer.from(await res.arrayBuffer()));
+  }
+
+  private async submitAndPoll(
+    endpoint: string,
+    params: Record<string, unknown>
+  ): Promise<V2Response> {
+    const submitRes = await fetch(`${BASE_URL}${endpoint}`, {
+      method: "POST",
+      headers: {
+        Authorization: this.authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ params }),
+    });
+
+    if (!submitRes.ok) {
+      throw new Error(
+        `Higgsfield ${endpoint} submit failed (${submitRes.status}): ${await submitRes.text()}`
+      );
+    }
+
+    let response = (await submitRes.json()) as V2Response;
+    const startTime = Date.now();
+
+    while (
+      response.status !== "completed" &&
+      response.status !== "failed" &&
+      response.status !== "nsfw"
+    ) {
+      if (Date.now() - startTime > MAX_POLL_MS) {
+        throw new Error(`Higgsfield ${endpoint} timed out waiting to complete`);
+      }
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+      const pollRes = await fetch(`${BASE_URL}/requests/${response.request_id}/status`, {
+        headers: { Authorization: this.authHeader },
+      });
+      if (!pollRes.ok) {
+        throw new Error(
+          `Higgsfield status check failed (${pollRes.status}): ${await pollRes.text()}`
+        );
+      }
+      response = (await pollRes.json()) as V2Response;
+    }
+
+    return response;
   }
 }

@@ -2,15 +2,32 @@ import { readFile, writeFile } from "node:fs/promises";
 import { Script, Topic } from "../types.js";
 import { ScriptWriter } from "../providers/llm/types.js";
 import { ClaudeScriptWriter } from "../providers/llm/claude.js";
+import { OllamaScriptWriter } from "../providers/llm/ollama.js";
 import { MockScriptWriter } from "../providers/llm/mock.js";
 import { pathsFor } from "./paths.js";
 
+/**
+ * Precedence: Claude (if you've set a key and want the quality) > local
+ * Ollama (free, set OLLAMA_MODEL to opt in) > mock. Ollama never costs
+ * anything and needs no signup, so it's the default "free tier" path once
+ * OLLAMA_MODEL is set — see .env.example.
+ */
 export function getScriptWriter(forceMock: boolean): ScriptWriter {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!forceMock && apiKey) {
     return new ClaudeScriptWriter(apiKey);
   }
-  console.log("[script] No ANTHROPIC_API_KEY (or --dry-run) — using mock scriptwriter");
+
+  const ollamaModel = process.env.OLLAMA_MODEL;
+  if (!forceMock && ollamaModel) {
+    const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
+    console.log(`[script] Using local Ollama (${ollamaModel} @ ${baseUrl}) — free, no API key`);
+    return new OllamaScriptWriter(ollamaModel, baseUrl);
+  }
+
+  console.log(
+    "[script] No ANTHROPIC_API_KEY or OLLAMA_MODEL (or --dry-run) — using mock scriptwriter"
+  );
   return new MockScriptWriter();
 }
 

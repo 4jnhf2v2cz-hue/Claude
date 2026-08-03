@@ -23,6 +23,30 @@ to actually running it.
   (Linux) or `brew install ffmpeg` (macOS). This is the only non-JS
   dependency and the only thing that isn't a plain `npm install`.
 
+## Scripting: Claude vs. free local Ollama
+
+The script step (`src/pipeline/script.ts`) picks a provider in this order:
+`ANTHROPIC_API_KEY` set → Claude; else `OLLAMA_MODEL` set → your local
+Ollama install (**genuinely $0, no signup, no key**); else → mock.
+
+To use the free path:
+
+```bash
+# once: install Ollama (ollama.com), then pull a model
+ollama pull llama3.1
+ollama serve   # or just leave the Ollama desktop app running
+```
+
+```bash
+# in .env
+OLLAMA_MODEL=llama3.1
+```
+
+Quality is lower than Claude for nuanced writing, but for this pipeline's
+templated task (turn a fixed line into one calm visual prompt) a mid-size
+open model is plenty — and it costs nothing regardless of volume, since
+nothing leaves your machine.
+
 ## Setup
 
 ```bash

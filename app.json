@@ -3,13 +3,18 @@
     "name": "Second Brain",
     "slug": "second-brain",
     "version": "1.0.0",
+    "scheme": "secondbrain",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Second Brain uses the microphone to record voice memos for your notes."
+        "NSMicrophoneUsageDescription": "Second Brain uses the microphone to record voice memos for your notes.",
+        "NSCameraUsageDescription": "Second Brain uses the camera to attach photos to your notes.",
+        "NSCalendarsUsageDescription": "Second Brain reads your calendar to show today's events in your daily briefing.",
+        "NSCalendarsFullAccessUsageDescription": "Second Brain reads your calendar to show today's events in your daily briefing.",
+        "NSRemindersFullAccessUsageDescription": "Second Brain reads your reminders to show open tasks in your daily briefing."
       }
     },
     "android": {

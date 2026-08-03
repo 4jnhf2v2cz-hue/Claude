@@ -11,9 +11,22 @@ import {
 } from 'react-native';
 import { Audio } from 'expo-av';
 import { File } from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 import type { Note } from '../lib/types';
 import { useAuth } from '../context/AuthContext';
+
+async function uploadAttachment(userId: string, uri: string, extension: string, contentType: string) {
+  const file = new File(uri);
+  if (!file.exists) throw new Error('File not found.');
+  const fileBuffer = await file.arrayBuffer();
+  const path = `${userId}/${Date.now()}.${extension}`;
+  const { error } = await supabase.storage
+    .from('note-attachments')
+    .upload(path, fileBuffer, { contentType });
+  if (error) throw error;
+  return path;
+}
 
 export default function CaptureScreen() {
   const { session } = useAuth();
@@ -46,16 +59,27 @@ export default function CaptureScreen() {
     loadNotes();
   }, [loadNotes]);
 
+  const processNote = useCallback(
+    (noteId: string) => {
+      supabase.functions.invoke('process-note', { body: { noteId } }).then(({ error }) => {
+        if (error) {
+          console.warn('Auto-tagging failed', error.message);
+          return;
+        }
+        loadNotes();
+      });
+    },
+    [loadNotes],
+  );
+
   const saveTextNote = async () => {
     if (!userId || !text.trim()) return;
     setSaving(true);
-    const { error } = await supabase.from('notes').insert({
-      user_id: userId,
-      content: text.trim(),
-      type: 'text',
-      tags: [],
-      source: 'app',
-    });
+    const { data, error } = await supabase
+      .from('notes')
+      .insert({ user_id: userId, content: text.trim(), type: 'text', tags: [], source: 'app' })
+      .select('id')
+      .single();
     setSaving(false);
     if (error) {
       Alert.alert('Failed to save note', error.message);
@@ -63,6 +87,7 @@ export default function CaptureScreen() {
     }
     setText('');
     loadNotes();
+    if (data) processNote(data.id);
   };
 
   const startRecording = async () => {
@@ -94,16 +119,7 @@ export default function CaptureScreen() {
       setRecording(null);
       if (!uri) throw new Error('Recording produced no file.');
 
-      const file = new File(uri);
-      if (!file.exists) throw new Error('Recording file not found.');
-
-      const fileBuffer = await file.arrayBuffer();
-      const path = `${userId}/${Date.now()}.m4a`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('note-attachments')
-        .upload(path, fileBuffer, { contentType: 'audio/m4a' });
-      if (uploadError) throw uploadError;
+      const path = await uploadAttachment(userId, uri, 'm4a', 'audio/m4a');
 
       const { error: insertError } = await supabase.from('notes').insert({
         user_id: userId,
@@ -117,6 +133,37 @@ export default function CaptureScreen() {
       loadNotes();
     } catch (err) {
       Alert.alert('Failed to save voice memo', (err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const capturePhoto = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Camera permission is required to add a photo note.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+    if (result.canceled || !userId) return;
+
+    setSaving(true);
+    try {
+      const asset = result.assets[0];
+      const path = await uploadAttachment(userId, asset.uri, 'jpg', 'image/jpeg');
+
+      const { error: insertError } = await supabase.from('notes').insert({
+        user_id: userId,
+        content: '',
+        type: 'photo',
+        tags: [],
+        source: path,
+      });
+      if (insertError) throw insertError;
+
+      loadNotes();
+    } catch (err) {
+      Alert.alert('Failed to save photo note', (err as Error).message);
     } finally {
       setSaving(false);
     }
@@ -150,6 +197,14 @@ export default function CaptureScreen() {
         >
           <Text style={styles.buttonText}>{isRecording ? 'Stop' : 'Record'}</Text>
         </Pressable>
+
+        <Pressable
+          style={[styles.button, styles.photoButton, saving && styles.buttonDisabled]}
+          onPress={capturePhoto}
+          disabled={saving}
+        >
+          <Text style={styles.buttonText}>Photo</Text>
+        </Pressable>
       </View>
 
       {saving && <ActivityIndicator style={styles.savingIndicator} />}
@@ -163,9 +218,12 @@ export default function CaptureScreen() {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <View style={styles.noteRow}>
-              <Text style={styles.noteType}>{item.type}</Text>
+              <Text style={styles.noteType}>
+                {item.type}
+                {item.tags.length > 0 ? ` · ${item.tags.join(', ')}` : ''}
+              </Text>
               <Text style={styles.noteContent} numberOfLines={2}>
-                {item.type === 'voice' ? '(voice memo)' : item.content}
+                {item.type === 'text' ? item.content : `(${item.type} attachment)`}
               </Text>
             </View>
           )}
@@ -199,7 +257,7 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
     marginTop: 12,
   },
   button: {
@@ -217,6 +275,9 @@ const styles = StyleSheet.create({
   },
   recordingActive: {
     backgroundColor: '#700',
+  },
+  photoButton: {
+    backgroundColor: '#357',
   },
   buttonText: {
     color: '#fff',

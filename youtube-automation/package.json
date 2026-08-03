@@ -1,0 +1,26 @@
+{
+  "name": "youtube-automation",
+  "version": "1.0.0",
+  "description": "Automated nursery-rhyme/toddler-cartoon YouTube channel pipeline: research -> script -> voice -> AI video -> assemble -> thumbnail -> upload.",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ytauto": "./dist/src/orchestrator.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "cli": "npm run build && node dist/src/orchestrator.js",
+    "youtube-auth": "npm run build && node dist/scripts/youtube-oauth-setup.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}

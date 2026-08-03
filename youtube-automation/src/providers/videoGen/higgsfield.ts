@@ -48,8 +48,8 @@ export class HiggsfieldVideoGenerator implements VideoGenerator {
   ): Promise<void> {
     const imageResponse = await this.submitAndPoll("/v1/text2image/soul", {
       prompt,
-      width_and_height: "2048x1152", // 16:9
-      quality: "1080p",
+      width_and_height: "1696x960", // 16:9, smaller/cheaper than 2048x1152
+      quality: "720p",
       batch_size: 1,
     });
 

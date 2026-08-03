@@ -55,11 +55,13 @@ program
   .command("video")
   .description("Generate video clips for each scene")
   .option("--topic <slug>", "topic slug (defaults to the next un-produced one)")
+  .option("--scene <n>", "generate just this one scene number (spend credit incrementally)")
   .action(async (opts, cmd) => {
     const forceMock = cmd.optsWithGlobals().dryRun;
     const topic = await resolveTopic(opts.topic);
     const script = await loadScript(topic.slug);
-    await runVideoStep(script, forceMock);
+    const sceneNumber = opts.scene ? parseInt(opts.scene, 10) : undefined;
+    await runVideoStep(script, forceMock, sceneNumber);
   });
 
 program

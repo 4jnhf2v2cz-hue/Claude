@@ -3,25 +3,33 @@
 # base R + stats only.
 
 # Preprocessing --------------------------------------------------------------
-# Steps: log2 -> per-sample median centring -> left-censored imputation
+# Steps: log2 -> (large panels only) per-sample median centring -> left-censored imputation
 # (feature minimum among the rows used for fitting) -> feature z-scoring.
 # The *fitted* parts (imputation floor, feature mean/sd) are the only places
 # where one sample's values can influence another's, which is where the
 # "preprocess before cross-validation" flaw leaks.
 
-prep_fit <- function(X) {
-  L <- log2(X)
-  L <- sweep(L, 1, apply(L, 1, stats::median, na.rm = TRUE), "-")
+# Per-sample median centring assumes most features do not change between
+# samples. That is reasonable for hundreds of features and wrong for a small
+# targeted panel, where it removes real signal and can make constant columns
+# look informative. norm = "auto" therefore applies it only when the matrix
+# has at least `min_features` columns.
+sample_norm <- function(L, norm) {
+  if (norm == "median") sweep(L, 1, apply(L, 1, stats::median, na.rm = TRUE), "-") else L
+}
+
+prep_fit <- function(X, norm = "auto", min_features = 100) {
+  if (norm == "auto") norm <- if (ncol(X) >= min_features) "median" else "none"
+  L <- sample_norm(log2(X), norm)
   floor_j <- apply(L, 2, function(v) if (all(is.na(v))) NA_real_ else min(v, na.rm = TRUE))
   floor_j[is.na(floor_j)] <- min(L, na.rm = TRUE)
   L <- impute_floor(L, floor_j)
-  list(floor = floor_j, mean = colMeans(L),
+  list(norm = norm, floor = floor_j, mean = colMeans(L),
        sd = pmax(apply(L, 2, stats::sd), 1e-8))
 }
 
 prep_apply <- function(fit, X) {
-  L <- log2(X)
-  L <- sweep(L, 1, apply(L, 1, stats::median, na.rm = TRUE), "-")
+  L <- sample_norm(log2(X), fit$norm)
   L <- impute_floor(L, fit$floor)
   sweep(sweep(L, 2, fit$mean, "-"), 2, fit$sd, "/")
 }

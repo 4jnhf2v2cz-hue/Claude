@@ -91,3 +91,21 @@ test_that("reference pipeline survives a batch effect that is not confounded", {
   res <- zoo_load("reference_nested_cv")$pipeline(sim$X, sim$y)
   expect_gt(res$performance, 0.8)
 })
+
+test_that("median normalisation is skipped for small panels and applied for large ones", {
+  skip_if_not_installed("yaml")
+  h <- zoo_load("reference_nested_cv")$env
+  small <- simulate_omics(n = 40, p = 10, n_signal = 2, seed = 1)$X
+  large <- simulate_omics(n = 40, p = 150, n_signal = 2, seed = 1)$X
+  expect_equal(h$prep_fit(small)$norm, "none")
+  expect_equal(h$prep_fit(large)$norm, "median")
+  expect_equal(h$prep_fit(small, norm = "median")$norm, "median")
+})
+
+test_that("a constant feature is not selected on a small panel", {
+  skip_if_not_installed("yaml")
+  sim <- simulate_omics(n = 120, p = 10, n_signal = 4, effect = 1.5, seed = 2)
+  X <- sim$X; X[, c(1, 2)] <- 10
+  res <- zoo_load("reference_nested_cv")$pipeline(X, sim$y)
+  expect_false(any(colnames(X)[1:2] %in% res$selected))
+})

@@ -60,15 +60,48 @@ designed to do, not that they generalise. The miss is genuine and expected:
 label-free preprocessing leaks very little (mean null AUC 0.48 against 0.49 for
 the reference), so a shuffled-label test cannot see it.
 
+## Real public data: Mice Protein Expression
+
+`data-raw/mice_protein.R` downloads the UCI Mice Protein Expression data
+(Higuera et al. 2015; 77 proteins, 1080 samples from 72 mice, 15 repeats each;
+nothing is committed) and audits a naive and a mouse-grouped pipeline on the
+genotype outcome:
+
+| Pipeline | Reported AUC | Shuffled-label AUC | Audit |
+|---|---|---|---|
+| Random-row CV (ignores mouse) | 0.851 | 0.666 | **flagged** |
+| Mouse-grouped CV | 0.752 | 0.508 | pass |
+
+The naive estimate is inflated by about 0.10 and the audit flags it; the grouped
+pipeline is clean. This is one real dataset and one flaw, so it is a
+demonstration, not a validation.
+
+## Name and prior work (checked 2 Oct 2026)
+
+* `omicsaudit` does not exist on CRAN, Bioconductor or the CRAN archive
+  (`pipeaudit` and several variants also do not). GitHub was **not** searched;
+  do that before settling on the name.
+* `bioLeak` (CRAN) already provides permutation-gap auditing, batch/fold
+  association tests, subject-grouped splits and guarded preprocessing, so
+  `audit_null` and `audit_confound` overlap with it. What omicsaudit does
+  differently is treat any pipeline as a black box `pipeline(X, y)`.
+* Leakage in omics biomarker work is well documented, and an in-silico
+  spike-in framework for microbiome biomarker recovery exists (bioRxiv), so
+  planted-signal recovery is **not** claimed as new. No novelty claim is made;
+  a proper literature review has not been done (the search above only read
+  titles and summaries).
+
 ## Not done / limits
 
 * `bioLeak` and `nestedcv` are not called; overlap has been noted, not integrated.
-* No public proteomics dataset is selected. `data-raw/pride_download.R` lists and
-  downloads files from PRIDE (listing and a download were tested), but most
-  projects ship raw files only and need a usable quantification table plus
-  outcome labels.
+* The proteomics example dataset covers repeated measures only; no public dataset
+  exercises batch confounding or MNAR missingness.
+* Survival outcomes are not supported.
 * `renv` is not set up. The GitHub Actions `R CMD check` workflow is written but
   has not run on GitHub.
 * `audit_planted` plants only upward shifts and cannot restore values lost to MNAR
   dropout (see the vignette).
 * `samples_needed()` is an extrapolation.
+* Preprocessing leakage fitted before cross-validation is not detected by any check.
+* Per-sample median normalisation in the zoo pipelines is applied only to panels
+  of 100+ features.

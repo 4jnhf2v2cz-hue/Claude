@@ -2,3 +2,4 @@ inst/extdata/targeted_proteomics.csv
 Rplots.pdf
 data-raw/proteomics_audit.html
 data-raw/mice/
+audit_output/

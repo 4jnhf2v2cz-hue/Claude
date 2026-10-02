@@ -203,7 +203,7 @@ check_omics_input <- function(X, y, warn = TRUE) {
                        ". Copies of one feature crowd other features out of the selected set.")
   if (any(X <= 0, na.rm = TRUE)) add("Non-positive values present; pipelines expect linear-scale intensities > 0.")
   if (min(table(y)) < 10) add("Smaller class has only ", min(table(y)), " samples; estimates will be very noisy.")
-  if (ncol(X) < 20) add("Only ", ncol(X), " features: per-sample median normalisation and feature selection behave poorly on small panels.")
+  if (ncol(X) < 20) add("Only ", ncol(X), " features: a small panel. Per-sample median normalisation is a poor choice here (the zoo pipelines skip it), and effect-size limits and chance-level recall are rough.")
   if (warn && length(notes)) for (n in notes) warning(n, call. = FALSE)
   invisible(list(notes = notes, ok = !length(notes)))
 }

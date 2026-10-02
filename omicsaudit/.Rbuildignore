@@ -4,3 +4,5 @@
 inst/extdata/targeted_proteomics.csv
 ^data-raw/proteomics_audit\.html$
 ^data-raw/mice$
+^run_audit\.R$
+^audit_output$

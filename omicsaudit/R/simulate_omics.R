@@ -34,6 +34,13 @@
 #' @param missing_rate Target overall fraction of missing values.
 #' @param mnar_slope Steepness of the missingness curve per log2 unit
 #'   (larger = more strongly abundance-dependent). `0` gives MCAR.
+#' @param n_subjects If not `NULL`, simulate repeated measures: `n_subjects`
+#'   subjects with `reps_per_subject` samples each (overrides `n`). The outcome
+#'   is a subject-level property, and each subject gets its own random
+#'   per-feature offset (SD `subject_sd`), so samples from one subject are
+#'   correlated. Row names are `subjNN_rR`.
+#' @param reps_per_subject Samples per subject when `n_subjects` is set.
+#' @param subject_sd SD (log2 units) of the per-subject, per-feature offset.
 #' @param seed Integer seed. Recorded in the output. The caller's RNG state
 #'   is left unchanged.
 #'
@@ -42,6 +49,8 @@
 #'   \item{`X`}{Raw intensities, samples x features, with `NA` for missing.}
 #'   \item{`y`}{Integer outcome, 0/1.}
 #'   \item{`batch`}{Factor of batch labels.}
+#'   \item{`subject`}{Factor of subject ids (unique per sample unless
+#'     `n_subjects` is set).}
 #'   \item{`truth`}{List: `signal_features` (character), `effect`
 #'     (named signed log2FC per signal feature).}
 #'   \item{`log2_complete`}{log2 intensities before missingness was applied.}
@@ -56,7 +65,9 @@ simulate_omics <- function(n = 100, p = 500, n_signal = 25, effect = 1,
                            prevalence = 0.5, n_batches = 2,
                            batch_effect = 0.5, batch_confound = 0,
                            noise_sd = c(0.3, 0.8), missing_rate = 0.2,
-                           mnar_slope = 1, seed = 1L) {
+                           mnar_slope = 1, n_subjects = NULL,
+                           reps_per_subject = 4, subject_sd = 1, seed = 1L) {
+  if (!is.null(n_subjects)) n <- n_subjects * reps_per_subject
   stopifnot(
     n >= 4, p >= 1, n_signal >= 0, n_signal <= p,
     prevalence > 0, prevalence < 1,
@@ -69,11 +80,23 @@ simulate_omics <- function(n = 100, p = 500, n_signal = 25, effect = 1,
 
   with_seed(seed, {
     feat <- sprintf("feat%0*d", nchar(p), seq_len(p))
-    samp <- sprintf("samp%0*d", nchar(n), seq_len(n))
 
-    # Outcome: fixed class counts so prevalence is exact
-    n1 <- max(1L, min(n - 1L, round(n * prevalence)))
-    y <- sample(rep(c(0L, 1L), c(n - n1, n1)))
+    # Outcome: fixed class counts so prevalence is exact. With repeated
+    # measures the outcome is drawn per subject, then copied to its samples.
+    if (is.null(n_subjects)) {
+      samp <- sprintf("samp%0*d", nchar(n), seq_len(n))
+      subject <- factor(samp, levels = samp)
+      n1 <- max(1L, min(n - 1L, round(n * prevalence)))
+      y <- sample(rep(c(0L, 1L), c(n - n1, n1)))
+      subj_idx <- seq_len(n)
+    } else {
+      subj_idx <- rep(seq_len(n_subjects), each = reps_per_subject)
+      samp <- sprintf("subj%0*d_r%d", nchar(n_subjects), subj_idx,
+                      rep(seq_len(reps_per_subject), n_subjects))
+      subject <- factor(sprintf("subj%0*d", nchar(n_subjects), subj_idx))
+      s1 <- max(1L, min(n_subjects - 1L, round(n_subjects * prevalence)))
+      y <- sample(rep(c(0L, 1L), c(n_subjects - s1, s1)))[subj_idx]
+    }
 
     # Batch: with probability batch_confound the batch is set by the outcome,
     # otherwise it is drawn uniformly
@@ -98,10 +121,12 @@ simulate_omics <- function(n = 100, p = 500, n_signal = 25, effect = 1,
     batch_shift <- matrix(stats::rnorm(n_batches * p, 0, batch_effect),
                           n_batches, p)
     size_factor <- stats::rnorm(n, 0, 0.5)
+    subj_off <- if (is.null(n_subjects)) 0 else
+      matrix(stats::rnorm(n_subjects * p, 0, subject_sd), n_subjects, p)[subj_idx, ]
 
     L <- matrix(mu, n, p, byrow = TRUE) +
       outer(y, delta) +
-      batch_shift[as.integer(batch), , drop = FALSE] +
+      batch_shift[as.integer(batch), , drop = FALSE] + subj_off +
       matrix(size_factor, n, p) +
       matrix(stats::rnorm(n * p), n, p) * matrix(sd_j, n, p, byrow = TRUE)
     dimnames(L) <- list(samp, feat)
@@ -123,7 +148,7 @@ simulate_omics <- function(n = 100, p = 500, n_signal = 25, effect = 1,
 
     structure(
       list(
-        X = X, y = y, batch = batch,
+        X = X, y = y, batch = batch, subject = subject,
         truth = list(
           signal_features = feat[signal_idx],
           effect = stats::setNames(delta[signal_idx], feat[signal_idx])

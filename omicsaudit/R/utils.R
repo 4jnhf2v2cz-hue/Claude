@@ -44,3 +44,28 @@ stratified_folds <- function(y, k) {
   }
   folds
 }
+
+# Helper functions shared with the zoo (prep, classifier, CV), loaded once.
+.omicsaudit_cache <- new.env(parent = emptyenv())
+zoo_helpers <- function() {
+  if (is.null(.omicsaudit_cache$helpers)) {
+    env <- new.env(parent = asNamespace("omicsaudit"))
+    sys.source(file.path(zoo_path(), "_common.R"), envir = env)
+    .omicsaudit_cache$helpers <- env
+  }
+  .omicsaudit_cache$helpers
+}
+
+# Permute labels, optionally at group level (all members of a group keep one label)
+permute_labels <- function(y, groups = NULL) {
+  if (is.null(groups)) return(sample(y))
+  g <- unique(groups)
+  gy <- sample(y[match(g, groups)])
+  gy[match(groups, g)]
+}
+
+# Run in parallel (forked, not on Windows) or serially
+par_lapply <- function(X, FUN, cores = 1) {
+  if (cores > 1 && .Platform$OS.type != "windows")
+    parallel::mclapply(X, FUN, mc.cores = cores) else lapply(X, FUN)
+}

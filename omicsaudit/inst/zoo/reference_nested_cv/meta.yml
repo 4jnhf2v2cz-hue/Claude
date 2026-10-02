@@ -5,7 +5,9 @@ description: >
   Correct reference. Preprocessing is fitted on training rows only; the
   number of selected features is tuned by inner CV inside each outer
   training set.
-dataset: simulate_omics (default settings)
+dataset:
+  generator: simulate_omics
+  args: {"n": 60, p: 300, n_signal: 10, effect: 1, batch_effect: 0.3, missing_rate: 0.2, seed: 17}
 expected_audit_outcome:
   flagged: false
   expected_checks: []

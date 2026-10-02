@@ -1,0 +1,11 @@
+name: flawed_batch_confounded
+is_reference: false
+flaw_type: batch_confounded_with_outcome
+description: >
+  Correct pipeline, but batch is perfectly confounded with the outcome and no true signal exists; performance reflects batch only.
+dataset:
+  generator: simulate_omics
+  args: {"n": 80, p: 100, n_signal: 0, batch_effect: 1.5, batch_confound: 1, missing_rate: 0.2, seed: 12}
+expected_audit_outcome:
+  flagged: true
+  expected_checks: [audit_confound]

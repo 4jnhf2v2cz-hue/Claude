@@ -2,3 +2,4 @@
 ^data-raw$
 ^\.github$
 inst/extdata/targeted_proteomics.csv
+^data-raw/proteomics_audit\.html$

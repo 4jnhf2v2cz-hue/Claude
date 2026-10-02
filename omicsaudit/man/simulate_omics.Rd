@@ -16,6 +16,9 @@ simulate_omics(
   noise_sd = c(0.3, 0.8),
   missing_rate = 0.2,
   mnar_slope = 1,
+  n_subjects = NULL,
+  reps_per_subject = 4,
+  subject_sd = 1,
   seed = 1L
 )
 }
@@ -48,6 +51,16 @@ the higher-numbered batches).}
 \item{mnar_slope}{Steepness of the missingness curve per log2 unit
 (larger = more strongly abundance-dependent). \code{0} gives MCAR.}
 
+\item{n_subjects}{If not \code{NULL}, simulate repeated measures: \code{n_subjects}
+subjects with \code{reps_per_subject} samples each (overrides \code{n}). The outcome
+is a subject-level property, and each subject gets its own random
+per-feature offset (SD \code{subject_sd}), so samples from one subject are
+correlated. Row names are \code{subjNN_rR}.}
+
+\item{reps_per_subject}{Samples per subject when \code{n_subjects} is set.}
+
+\item{subject_sd}{SD (log2 units) of the per-subject, per-feature offset.}
+
 \item{seed}{Integer seed. Recorded in the output. The caller's RNG state
 is left unchanged.}
 }
@@ -57,6 +70,8 @@ An object of class \code{omics_sim}, a list with
 \item{\code{X}}{Raw intensities, samples x features, with \code{NA} for missing.}
 \item{\code{y}}{Integer outcome, 0/1.}
 \item{\code{batch}}{Factor of batch labels.}
+\item{\code{subject}}{Factor of subject ids (unique per sample unless
+\code{n_subjects} is set).}
 \item{\code{truth}}{List: \code{signal_features} (character), \code{effect}
 (named signed log2FC per signal feature).}
 \item{\code{log2_complete}}{log2 intensities before missingness was applied.}

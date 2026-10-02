@@ -1,0 +1,11 @@
+name: flawed_repeated_measures
+is_reference: false
+flaw_type: repeated_measures_leakage
+description: >
+  Several samples per subject are split at random across train and test folds.
+dataset:
+  generator: simulate_omics
+  args: {n_subjects: 20, reps_per_subject: 4, subject_sd: 1.2, p: 100, n_signal: 5, effect: 1.5, batch_effect: 0.3, missing_rate: 0.2, seed: 13}
+expected_audit_outcome:
+  flagged: true
+  expected_checks: [audit_null]

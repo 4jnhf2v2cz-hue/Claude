@@ -1,0 +1,11 @@
+name: reference_grouped_cv
+is_reference: true
+flaw_type: none
+description: >
+  Correct handling of repeated measures: subject-grouped nested CV.
+dataset:
+  generator: simulate_omics
+  args: {n_subjects: 20, reps_per_subject: 4, subject_sd: 1.2, p: 100, n_signal: 5, effect: 1.5, batch_effect: 0.3, missing_rate: 0.2, seed: 14}
+expected_audit_outcome:
+  flagged: false
+  expected_checks: []

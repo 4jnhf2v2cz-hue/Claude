@@ -1,0 +1,118 @@
+---
+title: "Getting started with omicsaudit"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with omicsaudit}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 5.5, fig.height = 3.6)
+library(omicsaudit)
+```
+
+## The idea
+
+A *pipeline* is a function `pipeline(X, y)`. `X` is a raw samples x features
+matrix (linear scale, `NA` for missing) and `y` a 0/1 outcome. It returns
+`list(selected = <character>, performance = <number>)`. omicsaudit never reads
+the pipeline's code; it controls what goes in and watches what comes out.
+
+## Simulated data with a known answer
+
+```{r sim}
+sim <- simulate_omics(n = 80, p = 150, n_signal = 10, effect = 1.5,
+                      batch_effect = 0.5, missing_rate = 0.2, seed = 1)
+sim
+```
+
+The signal (`sim$truth`), the batch structure and an abundance-dependent
+(MNAR) missingness pattern are all known.
+
+## Run a pipeline and audit it
+
+```{r audit}
+pipe <- zoo_load("reference_nested_cv")$pipeline
+pipe(sim$X, sim$y)$performance
+
+a <- audit_standard(pipe, sim$X, sim$y, batch = sim$batch, quick = TRUE, seed = 1)
+a
+```
+
+The standard audit runs a shuffled-label test through the whole pipeline
+(`audit_null`), a batch-confounding check (`audit_confound`) and a feature
+stability check (`audit_stability`, reported but not part of the verdict).
+
+## How small an effect can this pipeline find?
+
+`audit_planted()` scrambles the outcome, plants a known fold change into random
+features and records how many of them the pipeline recovers.
+
+```{r planted}
+top5 <- function(X, y) {
+  L <- log2(X); L[is.na(L)] <- min(L, na.rm = TRUE)
+  t <- abs(apply(L, 2, function(v) stats::t.test(v ~ y)$statistic))
+  list(selected = names(sort(t, decreasing = TRUE))[1:5], performance = NA_real_)
+}
+p <- audit_planted(top5, sim$X, sim$y, effects = c(0, 0.5, 1, 1.5, 2),
+                   n_plant = 3, reps = 10, n_grid = c(40, 80), seed = 1)
+p
+plot(p)
+samples_needed(p, effect = 0.25)
+```
+
+### Planting and MNAR missingness: approach and limits
+
+* Planting multiplies the **observed** values of the chosen features in class 1
+  by `2^effect`. Missing values stay missing and nothing new is masked, so the
+  missingness pattern is unchanged (this is tested).
+* In real MNAR data a higher true abundance is also less likely to be missing.
+  Planting cannot undo values that were already missing, so planted features keep
+  slightly more missingness in class 1 than a truly higher-abundance feature
+  would. For positive effects this makes the audit conservative.
+* Only upward shifts in class 1 are planted. A downward shift would need
+  synthetic extra dropout based on an assumed MNAR curve.
+* `samples_needed()` extrapolates the MDE with a power law in n. It is reliable
+  close to the sample sizes tested and should be treated as a rough guide beyond.
+
+## Which analysis decision matters?
+
+```{r variants}
+g <- variant_grid(variant_pipeline, norm = c("none", "median"),
+                  impute = c("min", "median"), max_missing = c(0.5, 1))
+v <- audit_variants(g$variants, sim$X, sim$y, design = g$design)
+v
+```
+
+## The zoo
+
+```{r zoo}
+zoo_list()
+zoo_load("flawed_select_before_split")$meta$description
+```
+
+`zoo_score(audit_fn)` generates each entry's dataset, runs `audit_fn` and
+reports the detection rate on the flawed pipelines and the false-alarm rate on
+the references. It takes a few minutes with the default settings, so it is not
+run here:
+
+```r
+zoo_score(audit_standard, quick = FALSE, n_perm = 30)
+```
+
+Any function `f(pipeline, X, y, batch, groups, quick, seed, ...)` returning an
+object with a logical `flagged` can be benchmarked the same way.
+
+## A one-page report
+
+```{r report, eval = FALSE}
+audit_report(a, planted = p, variants = v, file = "audit.html",
+             pipeline_name = "reference_nested_cv")
+```
+
+## Not yet covered
+
+omicsaudit does not yet call `bioLeak` or `nestedcv`; overlap with them has been
+noted but not integrated, and no novelty claim is made until a literature and
+package search has been done.

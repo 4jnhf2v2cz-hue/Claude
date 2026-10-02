@@ -1,0 +1,75 @@
+#' One-page HTML audit report
+#'
+#' Assembles the results of the individual audits into a single
+#' self-contained HTML file (inline SVG plots, no external resources, no
+#' rmarkdown needed): a verdict per check, the power curve with the minimum
+#' detectable effect, the decision-attribution table, and a plain-language
+#' evidence statement. Every section shows the seed used.
+#'
+#' @param audit An `audit_standard` object (or any list of `audit_null`,
+#'   `audit_confound`, `audit_stability` results with a `checks` table).
+#' @param planted Optional `audit_planted` object.
+#' @param variants Optional `audit_variants` object.
+#' @param file Output path.
+#' @param title Report title.
+#' @param pipeline_name Name shown in the report.
+#' @return The path to the file, invisibly.
+#' @export
+audit_report <- function(audit, planted = NULL, variants = NULL,
+                         file = "omicsaudit_report.html",
+                         title = "Pipeline audit", pipeline_name = "pipeline") {
+  stopifnot(inherits(audit, "audit_standard"))
+  esc <- function(x) { x <- gsub("&", "&amp;", x, fixed = TRUE)
+    x <- gsub("<", "&lt;", x, fixed = TRUE); gsub(">", "&gt;", x, fixed = TRUE) }
+  svg_of <- function(obj, w = 5, h = 3.4) {
+    f <- tempfile(fileext = ".svg"); on.exit(unlink(f))
+    grDevices::svg(f, width = w, height = h); plot(obj); grDevices::dev.off()
+    x <- readLines(f, warn = FALSE); paste(x[-grep("^<\\?xml", x)], collapse = "\n")
+  }
+  rows <- paste0(vapply(seq_len(nrow(audit$checks)), function(i) with(audit$checks[i, ], sprintf(
+    "<tr><td>%s</td><td class='%s'>%s</td><td>%s</td></tr>", esc(check),
+    if (flagged) "bad" else "ok", if (flagged) "FLAGGED" else if (drives_verdict) "pass" else "info",
+    esc(evidence))), character(1)), collapse = "\n")
+
+  statement <- if (audit$flagged) {
+    f <- audit$checks$check[audit$checks$flagged & audit$checks$drives_verdict]
+    sprintf("The audit found evidence that the reported performance of this pipeline cannot be taken at face value (flagged: %s). The performance figure should not be relied on until the cause is fixed.", paste(f, collapse = ", "))
+  } else {
+    "No problem was found by the checks that were run. This does not prove the pipeline is correct: it means the checks listed below, at the sample size and effect sizes tested, did not detect a flaw."
+  }
+  pl <- ""
+  if (!is.null(planted)) {
+    m <- planted$mde[which.max(planted$mde$n), ]
+    sn <- if (is.finite(m$mde)) samples_needed(planted, m$mde / 2) else NA
+    pl <- sprintf("<h2>Power curve (planted signal)</h2>%s<p>%s</p><p class='seed'>seed %s; %d replicates per effect; %d features planted each time.</p>",
+      svg_of(planted),
+      if (is.finite(m$mde)) sprintf("With %d samples, this pipeline reliably recovers a planted effect of about <b>%.2f log2 fold change (%.2fx)</b> or larger. Detecting an effect half that size would need roughly <b>%s</b> samples (extrapolated).", m$n, m$mde, m$fold_change, format(sn, big.mark = ","))
+      else sprintf("Even at the largest effect tested (%.1f log2FC) the pipeline did not recover the planted features reliably.", max(planted$params$effects)),
+      planted$seed, planted$params$reps, planted$params$n_plant)
+  }
+  va <- ""
+  if (!is.null(variants)) {
+    at <- if (!is.null(variants$attribution)) paste0("<table><tr><th>decision</th><th>mean change in selected set (1 - Jaccard)</th><th>mean change in performance</th></tr>",
+      paste(sprintf("<tr><td>%s</td><td>%.2f</td><td>%.3f</td></tr>", esc(variants$attribution$decision),
+                    variants$attribution$mean_selection_change, variants$attribution$mean_performance_change), collapse = ""), "</table>") else ""
+    va <- sprintf("<h2>Decision attribution</h2><p>%s</p>%s%s<p class='seed'>seed %s</p>", esc(variants$evidence), at, svg_of(variants), variants$seed)
+  }
+  html <- sprintf("<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>%s</title><style>
+body{font:15px/1.5 system-ui,sans-serif;max-width:820px;margin:2rem auto;padding:0 1rem;color:#1b1f23;background:#fff}
+h1{font-size:1.5rem}h2{font-size:1.1rem;margin-top:1.6rem;border-bottom:1px solid #ddd}
+table{border-collapse:collapse;width:100%%}td,th{border:1px solid #ddd;padding:.35rem .5rem;text-align:left;vertical-align:top}
+.ok{color:#1a7f37;font-weight:600}.bad{color:#cf222e;font-weight:600}.seed{color:#666;font-size:.85rem}
+.box{padding:.8rem 1rem;border-radius:6px;background:%s}svg{max-width:100%%;height:auto}
+@media (prefers-color-scheme:dark){body{background:#0d1117;color:#e6edf3}td,th,h2{border-color:#30363d}.box{background:#161b22}svg{background:#fff}}
+</style></head><body><h1>%s</h1><p>Pipeline: <b>%s</b></p>
+<div class='box'><b>Verdict: <span class='%s'>%s</span></b><br>%s</div>
+<h2>Checks</h2><table><tr><th>check</th><th>result</th><th>evidence</th></tr>%s</table><p class='seed'>seed %s</p>
+%s%s
+<p class='seed'>Generated by omicsaudit. Performance is cross-validated AUC unless the pipeline reports otherwise.</p></body></html>",
+    esc(title), if (audit$flagged) "#fff1f0" else "#f0fff4", esc(title), esc(pipeline_name),
+    if (audit$flagged) "bad" else "ok", if (audit$flagged) "FLAGGED" else "no problem found",
+    esc(statement), rows, audit$seed, pl, va)
+  writeLines(html, file)
+  invisible(file)
+}

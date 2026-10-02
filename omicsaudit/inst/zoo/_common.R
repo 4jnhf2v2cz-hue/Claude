@@ -93,3 +93,50 @@ with_seed <- function(seed, expr) {
   set.seed(seed)
   expr
 }
+
+# Folds ------------------------------------------------------------------------
+# With `groups`, all samples of a group (e.g. one subject) share a fold.
+make_folds <- function(y, k, groups = NULL) {
+  if (is.null(groups)) return(stratified_folds(y, k))
+  g <- unique(groups)
+  gy <- y[match(g, groups)]
+  gf <- stratified_folds(gy, min(k, length(g)))
+  gf[match(groups, g)]
+}
+
+subject_ids <- function(X) sub("_r[0-9]+$", "", rownames(X))
+
+# Reference pipeline body (correct nested CV); reused by several zoo entries.
+# `grouped = TRUE` keeps all samples of a subject (row names `<subject>_r<n>`)
+# in the same fold, at both CV levels.
+nested_cv_pipeline <- function(X, y, k_outer = 5, k_inner = 3,
+                               grid = c(5, 20, 50), grouped = FALSE, seed = 1) {
+  X <- check_inputs(X, y)
+  # never tune over more features than exist, otherwise 'select' = 'keep all'
+  grid <- unique(pmin(grid, max(1L, floor(ncol(X) / 2))))
+  groups <- if (grouped) subject_ids(X) else NULL
+  tune <- function(Xt, yt, gt) {
+    inner <- make_folds(yt, k_inner, gt)
+    aucs <- vapply(grid, function(k) cv_auc(Xt, yt, inner, k), numeric(1))
+    grid[which.max(aucs)]
+  }
+  with_seed(seed, {
+    outer <- make_folds(y, k_outer, groups)
+    score <- numeric(length(y))
+    for (f in sort(unique(outer))) {
+      tr <- outer != f
+      k <- tune(X[tr, , drop = FALSE], y[tr], groups[tr])
+      fit <- prep_fit(X[tr, , drop = FALSE])
+      Ztr <- prep_apply(fit, X[tr, , drop = FALSE])
+      Zte <- prep_apply(fit, X[!tr, , drop = FALSE])
+      sel <- top_features(Ztr, y[tr], k)
+      score[!tr] <- dlda_fit(Ztr, y[tr], sel)(Zte)
+    }
+    # Final model on all samples (not used for `performance`)
+    k <- tune(X, y, groups)
+    fit <- prep_fit(X)
+    Z <- prep_apply(fit, X)
+    list(selected = colnames(X)[top_features(Z, y, k)],
+         performance = auc(score, y))
+  })
+}

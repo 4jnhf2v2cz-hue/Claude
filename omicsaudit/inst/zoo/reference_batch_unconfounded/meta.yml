@@ -1,0 +1,11 @@
+name: reference_batch_unconfounded
+is_reference: true
+flaw_type: none
+description: >
+  Strong batch effect that is not confounded with the outcome; must not raise a confounding alarm.
+dataset:
+  generator: simulate_omics
+  args: {"n": 80, p: 100, n_signal: 10, effect: 1.5, batch_effect: 1.5, batch_confound: 0, missing_rate: 0.2, seed: 15}
+expected_audit_outcome:
+  flagged: false
+  expected_checks: []

@@ -8,6 +8,8 @@
 pipeline <- function(X, y, k_outer = 5, k_inner = 3,
                      grid = c(5, 20, 50), seed = 1) {
   X <- check_inputs(X, y)
+  # never tune over more features than exist, otherwise 'select' = 'keep all'
+  grid <- unique(pmin(grid, max(1L, floor(ncol(X) / 2))))
   tune <- function(Xt, yt) {
     inner <- stratified_folds(yt, k_inner)
     aucs <- vapply(grid, function(k) cv_auc(Xt, yt, inner, k), numeric(1))

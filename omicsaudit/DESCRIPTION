@@ -14,4 +14,7 @@ Suggests:
     yaml
 Config/testthat/edition: 3
 Imports: 
-    stats
+    graphics,
+    parallel,
+    stats,
+    utils

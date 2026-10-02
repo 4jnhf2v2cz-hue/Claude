@@ -20,6 +20,7 @@
 #' @export
 audit_standard <- function(pipeline, X, y, batch = NULL, groups = NULL,
                            quick = FALSE, stability = TRUE, cores = 1, seed = 1L, ...) {
+  check_omics_input(X, y)
   parts <- list(null = audit_null(pipeline, X, y, groups = groups, quick = quick,
                                   cores = cores, seed = seed, ...))
   if (!is.null(batch)) parts$confound <- audit_confound(X, y, batch, seed = seed)

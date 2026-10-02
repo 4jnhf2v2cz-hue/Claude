@@ -25,6 +25,7 @@ See `vignette("getting-started")`.
 
 | Function | Purpose |
 |---|---|
+| `read_omics()`, `check_omics_input()` | Read CSV/TSV/Excel in varied layouts (samples in rows or columns, any column order, text missing codes, log or linear scale); flags duplicate, constant and identical columns |
 | `simulate_omics()` | Raw intensities with planted signal, batch effect (optionally confounded), MNAR missingness, optional repeated measures |
 | `audit_planted()`, `plant_signal()`, `samples_needed()` | Planted-signal recovery, power curve, minimum detectable effect |
 | `audit_null()` | Shuffled-label test through the whole pipeline (group-aware) |

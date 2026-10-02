@@ -75,6 +75,7 @@ audit_planted <- function(pipeline, X, y, effects = c(0, 0.25, 0.5, 0.75, 1, 1.5
   stopifnot(is.function(pipeline), is.matrix(X), !is.null(colnames(X)),
             length(y) == nrow(X), all(y %in% c(0L, 1L)),
             target_recall > 0, target_recall <= 1)
+  check_omics_input(X, y)
   if (quick) { reps <- 3; effects <- c(0, 0.5, 1, 2) }
   p <- ncol(X); N <- nrow(X)
   if (is.null(n_plant)) n_plant <- max(1L, round(0.1 * p))

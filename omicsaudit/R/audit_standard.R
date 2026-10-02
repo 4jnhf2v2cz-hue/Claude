@@ -24,7 +24,7 @@ audit_standard <- function(pipeline, X, y, batch = NULL, groups = NULL,
   parts <- list(null = audit_null(pipeline, X, y, groups = groups, quick = quick,
                                   cores = cores, seed = seed, ...))
   if (!is.null(batch)) parts$confound <- audit_confound(X, y, batch, seed = seed)
-  if (stability) parts$stability <- audit_stability(pipeline, X, y, quick = quick,
+  if (stability) parts$stability <- audit_stability(pipeline, X, y, groups = groups, quick = quick,
                                                     cores = cores, seed = seed)
   checks <- data.frame(
     check = names(parts),

@@ -12,15 +12,17 @@
 # Any setting you define BEFORE running this script (e.g. DATA_FILE <- "...") wins
 # over the default shown here, so you do not have to edit the file.
 cfg <- function(name, default) if (exists(name, envir = globalenv())) get(name, envir = globalenv()) else default
-DATA_FILE   <- cfg("DATA_FILE",  NULL)          # path to your .csv/.tsv/.xlsx, or NULL to choose a file
-OUTCOME     <- cfg("OUTCOME",    "Progress")    # column holding the 0/1 outcome (or two labels)
-ID_COLUMN   <- cfg("ID_COLUMN",  "PatientID")   # sample id column, or NULL
-COVARIATES  <- cfg("COVARIATES", c("Age", "Sex", "WBC", "BMI"))   # non-protein columns to set aside
-BATCH       <- cfg("BATCH",      NULL)          # batch / site / run column name, or NULL if none
-SCALE       <- cfg("SCALE",      "log2")        # "log2", "log10", "ln", "linear" or "auto" (a guess)
-POSITIVE    <- cfg("POSITIVE",   NULL)          # value of OUTCOME to code as 1 (NULL = automatic)
-QUICK       <- cfg("QUICK",      FALSE)         # TRUE = faster but rougher; FALSE = fuller (about a minute on small data)
-SEED        <- cfg("SEED",       1)             # recorded in the report so results can be reproduced
+DATA_FILE   <- cfg("DATA_FILE",  NULL)    # path to your .csv/.tsv/.xlsx, or NULL to choose a file
+# Everything below is GUESSED from the file when left as NULL / "auto". The guesses are
+# printed in step 1: read them. Set a value to override a wrong guess.
+OUTCOME     <- cfg("OUTCOME",    NULL)    # name of the two-valued outcome column
+ID_COLUMN   <- cfg("ID_COLUMN",  NULL)    # sample id column (FALSE = none)
+COVARIATES  <- cfg("COVARIATES", NULL)    # non-measurement columns to set aside, e.g. c("Age","Sex")
+BATCH       <- cfg("BATCH",      NULL)    # batch / site / run column (FALSE = none)
+SCALE       <- cfg("SCALE",      "auto")  # "log2", "log10", "ln", "linear" or "auto" (a guess!)
+POSITIVE    <- cfg("POSITIVE",   NULL)    # value of OUTCOME to code as 1 (NULL = automatic)
+QUICK       <- cfg("QUICK",      FALSE)   # TRUE = faster but rougher; FALSE = fuller (about a minute on small data)
+SEED        <- cfg("SEED",       1)       # recorded in the report so results can be reproduced
 OUT_DIR     <- cfg("OUT_DIR",    "audit_output")
 TITLE       <- cfg("TITLE",      "Audit: biomarker analysis")
 # -----------------------------------------------------------------------------
@@ -41,14 +43,20 @@ dir.create(OUT_DIR, showWarnings = FALSE)
 # 1. Read the data ---------------------------------------------------------------
 say("1/5 Reading the data")
 if (is.null(DATA_FILE)) DATA_FILE <- file.choose()
-d <- read_omics(DATA_FILE, outcome = OUTCOME, id = ID_COLUMN, covariates = COVARIATES,
-                batch = BATCH, scale = SCALE, positive_label = POSITIVE)
+d <- read_omics_auto(DATA_FILE, outcome = OUTCOME, id = ID_COLUMN, covariates = COVARIATES,
+                     batch = BATCH, scale = SCALE, positive_label = POSITIVE)
+cat("\nCHECK THE LINES STARTING 'GUESS' ABOVE: if the outcome, covariates or scale are wrong,\n",
+    "set OUTCOME / COVARIATES / SCALE before running and run again.\n", sep = "")
 print(d)
 
 # 2. Core audit -------------------------------------------------------------------
 say("2/5 Core audit (shuffled-label test, confounding, stability)")
-pipe <- zoo_load("reference_nested_cv")$pipeline      # the analysis being audited
-aud <- audit_standard(pipe, d$X, d$y, batch = d$batch, quick = QUICK, seed = SEED)
+# The analysis being audited: nested CV with train-only preprocessing. If repeated
+# measures were detected, use the subject-grouped version and permute per subject.
+PIPE_NAME <- if (is.null(d$groups)) "reference_nested_cv" else "reference_grouped_cv"
+if (!is.null(d$groups)) cat("Repeated measures detected: using", PIPE_NAME, "\n")
+pipe <- zoo_load(PIPE_NAME)$pipeline
+aud <- audit_standard(pipe, d$X, d$y, batch = d$batch, groups = d$groups, quick = QUICK, seed = SEED)
 print(aud)
 
 # 3. Power curve --------------------------------------------------------------------
@@ -58,7 +66,7 @@ effects <- if (QUICK) c(0, 0.25, 0.5, 1, 2) else c(0, 0.1, 0.2, 0.3, 0.5, 0.75, 
 pl <- audit_planted(pipe, d$X, d$y, effects = effects, n_plant = max(1, round(0.2 * ncol(d$X))),
                     reps = if (QUICK) 4 else 10,
                     n_grid = if (QUICK) n else unique(round(n * c(0.25, 0.5, 1))),
-                    progress = TRUE, seed = SEED)
+                    groups = d$groups, progress = TRUE, seed = SEED)
 print(pl)
 
 # 4. Which analysis decisions matter -----------------------------------------------------
@@ -72,7 +80,7 @@ print(va)
 say("5/5 Writing the report")
 report <- file.path(OUT_DIR, "audit_report.html")
 audit_report(aud, planted = pl, variants = va, file = report, title = TITLE,
-             pipeline_name = "reference_nested_cv (nested CV, train-only preprocessing)")
+             pipeline_name = paste0(PIPE_NAME, " (nested CV, train-only preprocessing)"))
 
 sum_txt <- c(
   TITLE, strrep("=", nchar(TITLE)), "",
@@ -86,10 +94,11 @@ sum_txt <- c(
   "Decision attribution:", paste0("  - ", va$evidence), "",
   "Caveats:",
   "  - One dataset, no independent validation.",
-  sprintf("  - The scale was set to '%s'; check this with whoever supplied the data.", SCALE),
+  sprintf("  - Scale used: '%s'; check this with whoever supplied the data.", d$scale),
   if (ncol(d$X) < 100) "  - Small panel: the 'median' normalisation option is a poor choice here, so the 'norm' row of the attribution mostly reflects that, not a real analysis decision.",
   if (ncol(d$X) < 20) "  - Very small panel: effect-size limits are rough.",
-  if (is.null(BATCH)) "  - No batch column given, so batch confounding was not checked.")
+  if (is.null(d$batch)) "  - No batch column found, so batch confounding was not checked.",
+  "  - Outcome, covariates and (if SCALE is 'auto') scale were guessed from the file: confirm them.")
 writeLines(unlist(sum_txt), file.path(OUT_DIR, "summary.txt"))
 saveRDS(list(data_notes = d$notes, audit = aud, planted = pl, variants = va, seed = SEED),
         file.path(OUT_DIR, "results.rds"))

@@ -51,25 +51,8 @@ read_omics <- function(file, outcome, id = NULL, features = NULL, batch = NULL,
   note <- function(...) notes <<- c(notes, paste0(...))
 
   # 1. Read ---------------------------------------------------------------
-  df <- if (is.data.frame(file)) as.data.frame(file, stringsAsFactors = FALSE) else {
-    stopifnot(is.character(file), length(file) == 1, file.exists(file))
-    ext <- tolower(tools::file_ext(file))
-    if (ext %in% c("xlsx", "xls")) {
-      if (!requireNamespace("readxl", quietly = TRUE))
-        stop("Reading Excel files needs the 'readxl' package: install.packages('readxl')")
-      as.data.frame(readxl::read_excel(file, sheet = sheet, col_types = "text",
-                                       na = missing_values), stringsAsFactors = FALSE)
-    } else if (ext == "rds") as.data.frame(readRDS(file)) else {
-      l1 <- readLines(file, n = 1, warn = FALSE)
-      sep <- c(",", ";", "\t")[which.max(vapply(c(",", ";", "\t"), function(s)
-        lengths(regmatches(l1, gregexpr(s, l1, fixed = TRUE))), numeric(1)))]
-      note("Read '", basename(file), "' as delimited text (separator '",
-           if (sep == "\t") "\\t" else sep, "').")
-      utils::read.table(file, header = TRUE, sep = sep, quote = "\"", comment.char = "",
-                        check.names = FALSE, stringsAsFactors = FALSE, colClasses = "character",
-                        na.strings = missing_values, fill = TRUE, strip.white = TRUE)
-    }
-  }
+  df <- .read_raw(file, sheet, missing_values)
+  if (!is.null(attr(df, "read_note"))) note(attr(df, "read_note"))
   df[] <- lapply(df, function(v) { v <- as.character(v); v[trimws(v) %in% missing_values] <- NA; v })
 
   # 2. Orientation --------------------------------------------------------
@@ -144,12 +127,14 @@ read_omics <- function(file, outcome, id = NULL, features = NULL, batch = NULL,
   # 6. Scale -> linear ---------------------------------------------------------
   v <- M[is.finite(M)]
   if (scale == "auto") {
-    scale <- if (any(v < 0)) "log2" else if (stats::quantile(v, 0.99) > 100 ||
-        stats::median(v) > 100) "linear" else "log2"
+    cs <- apply(M, 2, function(x) { x <- x[is.finite(x)]; if (length(x) < 5 || stats::sd(x) == 0) NA_real_ else mean(((x - mean(x)) / stats::sd(x))^3) })
+    skew <- stats::median(cs, na.rm = TRUE)
+    scale <- if (is.finite(skew) && skew > 1) "linear" else if (any(v < 0)) "log2" else
+      if (stats::quantile(v, 0.99) > 100 || stats::median(v) > 100) "linear" else "log2"
     note("Scale not given; guessed '", scale, "' (values ", signif(min(v), 3), " to ", signif(max(v), 3),
-         ", median ", signif(stats::median(v), 3), "). ",
-         if (scale == "log2") "log2, ln and log10 cannot be told apart from the values alone; pass `scale` if you know it."
-         else "Check that these are not already log-transformed.")
+         ", median ", signif(stats::median(v), 3), ", typical skew ", signif(skew, 2), "). ",
+         if (scale == "log2") "Roughly symmetric small values suggest a log scale; log2, ln and log10 cannot be told apart, so pass `scale` if you know it."
+         else "Strongly right-skewed values suggest raw (linear) intensities; check that they are not already log-transformed.")
   }
   M <- switch(scale, linear = M, log2 = 2^M, log10 = 10^M, ln = exp(M))
   if (scale != "linear") note("Converted from ", scale, " back to the linear scale (pipelines apply their own log).")
@@ -216,4 +201,153 @@ print.omics_data <- function(x, ...) {
   if (!is.null(x$covariates)) cat("  covariates: ", paste(names(x$covariates), collapse = ", "), "\n", sep = "")
   cat("What was done / found:\n"); for (n in x$notes) cat("  - ", n, "\n", sep = "")
   invisible(x)
+}
+
+
+# Read any supported table into a data frame of character columns -------------
+.read_raw <- function(file, sheet = 1, missing_values = c("", "NA", "N/A", "n/a", "NaN", "#N/A",
+                      "null", "NULL", "Filtered", "filtered", "-", "--", "ND")) {
+  rn <- NULL
+  df <- if (is.data.frame(file)) as.data.frame(file, stringsAsFactors = FALSE) else {
+    stopifnot(is.character(file), length(file) == 1, file.exists(file))
+    ext <- tolower(tools::file_ext(file))
+    if (ext %in% c("xlsx", "xls")) {
+      if (!requireNamespace("readxl", quietly = TRUE))
+        stop("Reading Excel files needs the 'readxl' package: install.packages('readxl')")
+      as.data.frame(readxl::read_excel(file, sheet = sheet, col_types = "text",
+                                       na = missing_values), stringsAsFactors = FALSE)
+    } else if (ext == "rds") as.data.frame(readRDS(file)) else {
+      l1 <- readLines(file, n = 1, warn = FALSE)
+      sep <- c(",", ";", "\t")[which.max(vapply(c(",", ";", "\t"), function(s)
+        lengths(regmatches(l1, gregexpr(s, l1, fixed = TRUE))), numeric(1)))]
+      rn <- paste0("Read '", basename(file), "' as delimited text (separator '",
+                   if (sep == "\t") "\\t" else sep, "').")
+      utils::read.table(file, header = TRUE, sep = sep, quote = "\"", comment.char = "",
+                        check.names = FALSE, stringsAsFactors = FALSE, colClasses = "character",
+                        na.strings = missing_values, fill = TRUE, strip.white = TRUE)
+    }
+  }
+  attr(df, "read_note") <- rn
+  df
+}
+
+#' Read an omics table and work out its layout automatically
+#'
+#' Like [read_omics()], but you only need to give the file. It guesses which
+#' column is the outcome, the sample id, the batch, the clinical covariates and
+#' which columns are the measured features, and whether samples are in rows or
+#' columns. Every guess is recorded in `$notes` (and printed) so it can be
+#' checked; anything you pass explicitly overrides the guess.
+#'
+#' Heuristics, in order: a two-valued column is the outcome (preferring names
+#' like `outcome`, `status`, `group`, `class`, `disease`, `progress`...); a
+#' name matching `id|sample|patient|subject` is the id; `batch|plate|run|site|
+#' centre|lab|date|cohort|study` columns are batch; names like age/sex/bmi, any
+#' column with few distinct values, and any numeric column whose typical size is
+#' more than ~30x away from the others are covariates; everything else numeric
+#' is a feature. **These are guesses**: always read the printout.
+#'
+#' @inheritParams read_omics
+#' @param outcome,id,batch,covariates,features Override the guess for these. For
+#'   `id` and `batch`, `FALSE` means "there is none" (`NULL` means "guess").
+#' @return An `omics_data` object (see [read_omics()]) with an extra element
+#'   `guess` listing what was guessed and which alternatives were considered.
+#' @export
+read_omics_auto <- function(file, outcome = NULL, id = NULL, batch = NULL,
+                            covariates = NULL, features = NULL,
+                            orientation = c("auto", "samples_in_rows", "samples_in_columns"),
+                            scale = c("auto", "linear", "log2", "log10", "ln"),
+                            positive_label = NULL, sheet = 1) {
+  orientation <- match.arg(orientation); scale <- match.arg(scale)
+  df <- .read_raw(file, sheet)
+  rn <- attr(df, "read_note")
+  guesses <- character(); alts <- list()
+  g <- function(...) guesses <<- c(guesses, paste0(...))
+  miss <- c("", "NA", "N/A", "n/a", "NaN", "#N/A", "null", "NULL", "Filtered", "filtered", "-", "--", "ND")
+  df[] <- lapply(df, function(v) { v <- trimws(as.character(v)); v[v %in% miss] <- NA; v })
+  nvals <- function(v) length(unique(v[!is.na(v)]))
+  is_num <- function(v) { x <- suppressWarnings(as.numeric(sub(",", ".", v, fixed = TRUE))); mean(!is.na(x) | is.na(v)) > 0.9 && any(!is.na(x)) }
+
+  # Orientation: if no column is a plausible outcome but a row is, transpose
+  has_outcome_col <- function(d) any(vapply(d, nvals, numeric(1)) == 2)
+  if (orientation == "auto") orientation <- if (!is.null(outcome) && outcome %in% names(df)) "samples_in_rows" else
+    if (has_outcome_col(df)) "samples_in_rows" else "samples_in_columns"
+  if (orientation == "samples_in_columns") {
+    fe <- make.unique(as.character(df[[1]]))
+    m <- t(as.matrix(df[-1])); colnames(m) <- fe
+    df <- data.frame(sample = rownames(m), m, check.names = FALSE, stringsAsFactors = FALSE)
+    rownames(df) <- NULL
+    if (is.null(id)) id <- "sample"
+    g("Samples were in columns (feature names in the first column); transposed.")
+  }
+  cols <- names(df)
+
+  # Outcome ---------------------------------------------------------------------
+  if (is.null(outcome)) {
+    cand <- cols[vapply(df, nvals, numeric(1)) == 2]
+    if (!length(cand)) stop("Could not find a two-valued column to use as the outcome. Columns: ",
+                            paste(utils::head(cols, 12), collapse = ", "), ". Pass `outcome = `.")
+    pri <- grepl("outcome|status|group|class|label|response|disease|case|control|diagnos|condition|progress|genotype|phenotype|event|target|treat",
+                 cand, ignore.case = TRUE)
+    outcome <- if (any(pri)) cand[pri][1] else cand[1]
+    others <- setdiff(cand, outcome)
+    g("Outcome: '", outcome, "' (a two-valued column", if (any(pri)) " with an outcome-like name" else "", ").",
+      if (length(others)) paste0(" Other two-valued columns, treated as covariates: ", paste(others, collapse = ", "), "."))
+    alts$outcome <- others
+  }
+  # Id --------------------------------------------------------------------------
+  if (isFALSE(id)) id <- NULL else if (is.null(id)) {
+    idc <- setdiff(cols[grepl("^(id|.*[_ .]id|id[_ .].*|sample.*|patient.*|subject.*|mouse.*|name|specimen.*)$", cols, ignore.case = TRUE)], outcome)
+    if (length(idc)) { id <- idc[1]; g("Sample id: '", id, "'.") }
+  }
+  # Batch -----------------------------------------------------------------------
+  if (isFALSE(batch)) batch <- NULL else if (is.null(batch)) {
+    bc <- setdiff(cols[grepl("batch|plate|run|site|cent(er|re)|lab|date|cohort|study|instrument|day", cols, ignore.case = TRUE)], c(outcome, id))
+    bc <- bc[vapply(bc, function(c) nvals(df[[c]]) %in% 2:30, logical(1))]
+    if (length(bc)) { batch <- bc[1]; g("Batch: '", batch, "' (name suggests a batch/site/run variable).") }
+  }
+  # Covariates --------------------------------------------------------------------
+  if (is.null(covariates)) {
+    rest <- setdiff(cols, c(outcome, id, batch))
+    name_cov <- grepl("^(age|sex|gender|bmi|wbc|weight|height|smok.*|ethnic.*|race|stage|grade|diabetes|treatment|behavior|behaviour|comorb.*|bp|sbp|dbp)$|age_|_age",
+                      rest, ignore.case = TRUE)
+    numc <- rest[vapply(df[rest], is_num, logical(1))]
+    med <- vapply(df[numc], function(v) stats::median(abs(suppressWarnings(as.numeric(sub(",", ".", v, fixed = TRUE)))), na.rm = TRUE), numeric(1))
+    size_out <- if (length(numc) >= 4) numc[abs(log10(pmax(med, 1e-9)) - stats::median(log10(pmax(med, 1e-9)))) > 1.5] else character()
+    few <- rest[vapply(df[rest], nvals, numeric(1)) <= 8]
+    nonnum <- rest[!vapply(df[rest], is_num, logical(1))]
+    covariates <- unique(c(rest[name_cov], size_out, few, nonnum))
+    if (length(covariates)) g("Set aside as covariates (not features): ", paste(covariates, collapse = ", "), ".")
+  }
+  fe <- setdiff(cols, c(outcome, id, batch, covariates))
+  g("Features: ", length(fe), " numeric columns", if (length(fe)) paste0(" (", fe[1], " ... ", fe[length(fe)], ")"), ".")
+  if (!length(fe)) stop("No feature columns left after setting aside the outcome, id, batch and covariates.")
+
+  raw_ids <- if (!is.null(id)) df[[id]] else NULL
+  d <- read_omics(df, outcome = outcome, id = id, features = fe, batch = batch, covariates = covariates,
+                  orientation = "samples_in_rows", scale = scale, positive_label = positive_label)
+  # Repeated measures: duplicated ids, or ids like "<subject>_<n>" whose prefix repeats
+  subj <- NULL
+  if (!is.null(raw_ids)) {
+    ri <- as.character(raw_ids[!is.na(df[[outcome]])])
+    if (anyDuplicated(ri)) subj <- ri else {
+      pre <- sub("[_.-]?[0-9]+$", "", ri); pre[!grepl("[_.-]?[0-9]+$", ri)] <- NA
+      u <- unique(stats::na.omit(pre))
+      if (!anyNA(pre) && length(u) >= 4 && length(u) < 0.67 * length(ri) &&
+          all(table(pre) >= 2) && !all(pre == pre[1])) subj <- pre
+    }
+  }
+  if (!is.null(subj)) {
+    consistent <- all(tapply(d$y, subj, function(v) length(unique(v))) == 1)
+    if (consistent) {
+      k <- stats::ave(seq_along(subj), subj, FUN = seq_along)
+      rownames(d$X) <- paste0(subj, "_r", k); d$id <- rownames(d$X)
+      d$groups <- subj
+      guesses <- c(guesses, sprintf("Repeated measures detected: %d samples from %d subjects (%s); the outcome is constant within each subject. Audits will keep each subject together.",
+                                    length(subj), length(unique(subj)), paste(utils::head(unique(subj), 3), collapse = ", ")))
+    } else guesses <- c(guesses, "Repeated ids found but the outcome changes within a subject; treated as independent samples (check this).")
+  }
+  d$notes <- c(if (!is.null(rn)) rn, paste0("GUESS: ", guesses), d$notes)
+  d$guess <- list(outcome = outcome, id = id, batch = batch, covariates = covariates, n_features = length(fe), repeated_measures = !is.null(d$groups))
+  d
 }

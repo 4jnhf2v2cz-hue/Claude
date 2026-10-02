@@ -21,10 +21,13 @@ audit_report(audit, planted = p, variants = v)             # one-page HTML
 
 See `vignette("getting-started")`.
 
+**One-click audit:** set `DATA_FILE <- "yourfile.csv"` and run `source("run_audit.R")`. It reads the file (guessing the layout and printing its guesses), audits it, tests how small an effect it could detect, and writes an HTML report and a text summary to `audit_output/`.
+
 ## What is in the package
 
 | Function | Purpose |
 |---|---|
+| `read_omics_auto()` | Give it only a file: it guesses outcome, id, batch, covariates, features, orientation, scale and repeated measures, and prints every guess |
 | `read_omics()`, `check_omics_input()` | Read CSV/TSV/Excel in varied layouts (samples in rows or columns, any column order, text missing codes, log or linear scale); flags duplicate, constant and identical columns |
 | `simulate_omics()` | Raw intensities with planted signal, batch effect (optionally confounded), MNAR missingness, optional repeated measures |
 | `audit_planted()`, `plant_signal()`, `samples_needed()` | Planted-signal recovery, power curve, minimum detectable effect |

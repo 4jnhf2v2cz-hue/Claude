@@ -88,3 +88,101 @@ test_that("audits refuse duplicate feature names", {
   expect_error(audit_standard(p, X, s$y), "Duplicate feature names")
   expect_error(audit_planted(p, X, s$y, quick = TRUE), "Duplicate feature names")
 })
+
+# automatic layout detection ---------------------------------------------------
+auto_df <- function(n = 40, seed = 1) {
+  set.seed(seed)
+  data.frame(SampleID = sprintf("S%02d", 1:n), Status = rep(c("healthy", "disease"), n / 2),
+             Age = round(rnorm(n, 55, 8)), Sex = rep(c("F", "M"), length.out = n),
+             Plate = rep(c("P1", "P2", "P3", "P4"), length.out = n), WBC = round(rnorm(n, 11000, 1500)),
+             matrix(round(rnorm(n * 8, 6, 1), 2), n, 8, dimnames = list(NULL, paste0("Prot", 1:8))),
+             stringsAsFactors = FALSE)
+}
+
+test_that("read_omics_auto finds outcome, id, batch, covariates and features", {
+  f <- tempfile(fileext = ".csv"); write.csv(auto_df(), f, row.names = FALSE)
+  d <- read_omics_auto(f)
+  expect_equal(d$guess$outcome, "Status"); expect_equal(d$guess$id, "SampleID")
+  expect_equal(d$guess$batch, "Plate")
+  expect_true(all(c("Age", "Sex", "WBC") %in% d$guess$covariates))
+  expect_equal(colnames(d$X), paste0("Prot", 1:8))
+  expect_equal(nlevels(d$batch), 4)
+  expect_true(any(grepl("^GUESS", d$notes)))
+})
+
+test_that("read_omics_auto copes with Excel and with samples in columns", {
+  skip_if_not_installed("writexl"); skip_if_not_installed("readxl")
+  x <- auto_df(); f <- tempfile(fileext = ".xlsx"); writexl::write_xlsx(x, f)
+  expect_equal(colnames(read_omics_auto(f)$X), paste0("Prot", 1:8))
+
+  long <- as.data.frame(t(x[setdiff(names(x), "SampleID")]), stringsAsFactors = FALSE)
+  names(long) <- x$SampleID; long <- cbind(feature = rownames(long), long)
+  f2 <- tempfile(fileext = ".csv"); write.csv(long, f2, row.names = FALSE)
+  d <- read_omics_auto(f2)
+  expect_equal(dim(d$X), c(40, 8)); expect_true(any(grepl("transposed", d$notes)))
+})
+
+test_that("explicit settings override the guesses", {
+  f <- tempfile(fileext = ".csv"); write.csv(auto_df(), f, row.names = FALSE)
+  d <- read_omics_auto(f, outcome = "Sex", covariates = c("Status", "Age", "WBC", "Plate"), batch = FALSE)
+  expect_equal(d$guess$outcome, "Sex")
+  expect_null(d$batch)
+})
+
+test_that("a size-outlier numeric column is treated as a covariate, a normal protein is not", {
+  x <- auto_df(); x$Albumin <- round(rnorm(40, 6.5, 0.5), 2)      # looks like the proteins
+  f <- tempfile(fileext = ".csv"); write.csv(x, f, row.names = FALSE)
+  d <- read_omics_auto(f)
+  expect_true("Albumin" %in% colnames(d$X))      # kept as a feature
+  expect_false("WBC" %in% colnames(d$X))         # 11000 vs ~6: set aside
+})
+
+test_that("linear-looking skewed data is guessed as linear, symmetric small values as log", {
+  set.seed(3); x <- auto_df()
+  x[paste0("Prot", 1:8)] <- lapply(x[paste0("Prot", 1:8)], function(v) round(rlnorm(40, 1, 0.9), 3))
+  f <- tempfile(fileext = ".csv"); write.csv(x, f, row.names = FALSE)
+  expect_equal(read_omics_auto(f)$scale, "linear")
+  f2 <- tempfile(fileext = ".csv"); write.csv(auto_df(), f2, row.names = FALSE)
+  expect_equal(read_omics_auto(f2)$scale, "log2")
+})
+
+test_that("read_omics_auto errors clearly when nothing can be an outcome", {
+  x <- auto_df(); x$Status <- seq_len(40); x$Sex <- seq_len(40) + 5
+  expect_error(read_omics_auto(x[setdiff(names(x), "Plate")], orientation = "samples_in_rows"), "two-valued")
+})
+
+test_that("repeated measures are detected from id patterns and from duplicated ids", {
+  set.seed(1); S <- 12; r <- 3
+  subj <- rep(sprintf("m%02d", 1:S), each = r); out <- rep(rep(c("A", "B"), S / 2), each = r)
+  x <- data.frame(ID = paste0(subj, "_", rep(1:r, S)), Group = out,
+                  matrix(round(rnorm(S * r * 6, 6, 1), 2), S * r, 6, dimnames = list(NULL, paste0("P", 1:6))),
+                  stringsAsFactors = FALSE)
+  d <- read_omics_auto(x)
+  expect_equal(length(unique(d$groups)), S)
+  expect_match(rownames(d$X)[1], "^m01_r1$")
+  expect_true(any(grepl("Repeated measures", d$notes)))
+  x2 <- x; x2$ID <- subj                         # duplicated ids
+  expect_equal(length(unique(read_omics_auto(x2)$groups)), S)
+  x3 <- x; x3$Group <- rep(c("A", "B"), length.out = nrow(x3))   # outcome varies within subject
+  expect_null(read_omics_auto(x3)$groups)
+})
+
+test_that("independent samples are not mistaken for repeated measures", {
+  f <- tempfile(fileext = ".csv"); write.csv(auto_df(), f, row.names = FALSE)
+  expect_null(read_omics_auto(f)$groups)
+})
+
+test_that("audit_planted permutes and subsamples at subject level when groups are given", {
+  set.seed(2); S <- 20; r <- 3
+  sim <- simulate_omics(n_subjects = S, reps_per_subject = r, p = 30, n_signal = 0, seed = 3)
+  g <- sub("_r[0-9]+$", "", rownames(sim$X)); seen <- list()
+  spy <- function(X, y) { seen[[length(seen) + 1]] <<- list(y = y, rn = rownames(X))
+    list(selected = colnames(X)[1], performance = 0.5) }
+  audit_planted(spy, sim$X, sim$y, effects = c(0, 1), reps = 2, n_grid = c(30, 60), groups = g,
+                progress = FALSE, seed = 1)
+  ok <- vapply(seen, function(s) {
+    sj <- sub("_r[0-9]+$", "", s$rn)
+    all(tapply(s$y, sj, function(v) length(unique(v))) == 1) && all(table(sj) == r)
+  }, logical(1))
+  expect_true(all(ok))
+})

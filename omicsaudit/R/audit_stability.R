@@ -7,19 +7,20 @@
 #' as evidence but does not drive the standard flag.
 #'
 #' @inheritParams audit_planted
+#' @param groups Optional subject ids; subsampling then drops whole subjects.
 #' @param n_runs Number of subsamples (4 in quick mode).
 #' @param keep Fraction of samples kept in each run.
 #' @param min_jaccard Mean Jaccard below which the check is flagged.
 #' @return Object of class `audit_stability` with `jaccard` (mean),
 #'   `pairwise`, `frequency` (selection frequency per feature), `flagged`.
 #' @export
-audit_stability <- function(pipeline, X, y, n_runs = 10, keep = 0.8,
+audit_stability <- function(pipeline, X, y, groups = NULL, n_runs = 10, keep = 0.8,
                             min_jaccard = 0.5, quick = FALSE, cores = 1,
                             seed = 1L) {
   stopifnot(is.function(pipeline), is.matrix(X), length(y) == nrow(X))
   if (quick) n_runs <- 4
   sels <- par_lapply(seq_len(n_runs), function(i) with_seed(seed + i, {
-    idx <- stratified_subsample(y, max(10L, round(keep * length(y))))
+    idx <- subsample_rows(y, max(10L, round(keep * length(y))), groups)
     tryCatch(as.character(pipeline(X[idx, , drop = FALSE], y[idx])$selected),
              error = function(e) character())
   }), cores)

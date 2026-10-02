@@ -48,6 +48,8 @@ plant_signal <- function(X, y, features, effect) {
 #'   `max(1, round(0.1 * ncol(X)))`.
 #' @param reps Replicates per effect size (each draws a new outcome
 #'   permutation and a new set of planted features).
+#' @param groups Optional subject ids for repeated measures. The outcome is then
+#'   permuted per subject and subsampling keeps whole subjects together.
 #' @param n_grid Optional sample sizes to subsample to (stratified). Needed
 #'   for [samples_needed()]. Default: the full sample only.
 #' @param target_recall Mean recall defining "detected".
@@ -69,7 +71,7 @@ plant_signal <- function(X, y, features, effect) {
 #' a
 #' @export
 audit_planted <- function(pipeline, X, y, effects = c(0, 0.25, 0.5, 0.75, 1, 1.5, 2),
-                          n_plant = NULL, reps = 20, n_grid = NULL,
+                          n_plant = NULL, reps = 20, n_grid = NULL, groups = NULL,
                           target_recall = 0.8, quick = FALSE, cores = 1,
                           progress = interactive(), seed = 1L) {
   stopifnot(is.function(pipeline), is.matrix(X), !is.null(colnames(X)),
@@ -90,8 +92,8 @@ audit_planted <- function(pipeline, X, y, effects = c(0, 0.25, 0.5, 0.75, 1, 1.5
   one_job <- function(j) {
     rep <- jobs$rep[j]; n <- jobs$n[j]
     out <- with_seed(seed + 1000L * match(n, n_grid) + rep, {
-      yp <- sample(y)                                  # destroy real signal
-      idx <- if (n < N) stratified_subsample(yp, n) else seq_len(N)
+      yp <- permute_labels(y, groups)                  # destroy real signal
+      idx <- if (n < N) subsample_rows(yp, n, groups) else seq_len(N)
       feats <- sample(colnames(X), n_plant)
       do.call(rbind, lapply(effects, function(e) {
         Xp <- plant_signal(X[idx, , drop = FALSE], yp[idx], feats, e)
@@ -150,6 +152,14 @@ find_mde <- function(effect, recall, target) {
 results_chance <- function(summ) {
   z <- summ[summ$effect == 0, ]
   if (nrow(z)) mean(z$recall) else NA_real_
+}
+
+# Subsample ~m rows; with groups, whole groups are kept or dropped together
+subsample_rows <- function(y, m, groups = NULL) {
+  if (is.null(groups)) return(stratified_subsample(y, m))
+  g <- unique(groups); gy <- y[match(g, groups)]
+  keep <- stratified_subsample(gy, max(2L, round(length(g) * m / length(y))))
+  which(groups %in% g[keep])
 }
 
 stratified_subsample <- function(y, m) {

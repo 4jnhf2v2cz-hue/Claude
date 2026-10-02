@@ -12,6 +12,7 @@ audit_planted(
   n_plant = NULL,
   reps = 20,
   n_grid = NULL,
+  groups = NULL,
   target_recall = 0.8,
   quick = FALSE,
   cores = 1,
@@ -38,6 +39,9 @@ permutation and a new set of planted features).}
 
 \item{n_grid}{Optional sample sizes to subsample to (stratified). Needed
 for \code{\link[=samples_needed]{samples_needed()}}. Default: the full sample only.}
+
+\item{groups}{Optional subject ids for repeated measures. The outcome is then
+permuted per subject and subsampling keeps whole subjects together.}
 
 \item{target_recall}{Mean recall defining "detected".}
 

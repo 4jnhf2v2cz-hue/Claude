@@ -8,6 +8,7 @@ audit_stability(
   pipeline,
   X,
   y,
+  groups = NULL,
   n_runs = 10,
   keep = 0.8,
   min_jaccard = 0.5,
@@ -23,6 +24,8 @@ audit_stability(
 \item{X}{Raw (linear-scale) samples x features matrix with column names.}
 
 \item{y}{Binary outcome, 0/1 (only its class balance is used).}
+
+\item{groups}{Optional subject ids; subsampling then drops whole subjects.}
 
 \item{n_runs}{Number of subsamples (4 in quick mode).}
 

@@ -1,0 +1,16 @@
+name: flawed_norm_before_cv
+is_reference: false
+flaw_type: preprocessing_leakage
+description: >
+  Imputation floor and feature z-scoring are fitted on all samples before
+  cross-validation. Feature selection and the classifier are refit inside
+  each fold. The performance estimate is optimistically biased, but the
+  bias from label-free preprocessing is small; the audit should flag it
+  only through checks that are sensitive to it.
+dataset: simulate_omics (default settings, small n, many features)
+expected_audit_outcome:
+  flagged: true
+  expected_checks: [audit_null]
+  notes: >
+    Leakage here is weak (no labels are used). Detection is expected to be
+    marginal; this entry sets the lower end of the benchmark.

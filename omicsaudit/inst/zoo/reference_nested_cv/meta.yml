@@ -1,0 +1,12 @@
+name: reference_nested_cv
+is_reference: true
+flaw_type: none
+description: >
+  Correct reference. Preprocessing is fitted on training rows only; the
+  number of selected features is tuned by inner CV inside each outer
+  training set.
+dataset: simulate_omics (default settings)
+expected_audit_outcome:
+  flagged: false
+  expected_checks: []
+  notes: Must pass every audit check (false-alarm control).

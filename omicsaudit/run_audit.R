@@ -1,24 +1,28 @@
 # =============================================================================
 #  omicsaudit: one-click audit of a biomarker analysis
 #  ---------------------------------------------------------------------------
-#  1. Edit the SETTINGS block below (or leave DATA_FILE as NULL to pick a file).
+#  1. Set DATA_FILE (and any other setting) before running, or edit the block below.
+#     Leave DATA_FILE unset to choose a file in a pop-up window.
 #  2. Run the whole script:  source("run_audit.R")
 #  Everything is written to the folder OUT_DIR: an HTML report, a plain-text
 #  summary and the raw results (.rds).
 # =============================================================================
 
 # ---- SETTINGS ----------------------------------------------------------------
-DATA_FILE   <- NULL                 # path to your .csv/.tsv/.xlsx, or NULL to choose a file
-OUTCOME     <- "Progress"           # column holding the 0/1 outcome (or two labels)
-ID_COLUMN   <- "PatientID"          # sample id column, or NULL
-COVARIATES  <- c("Age", "Sex", "WBC", "BMI")   # non-protein columns to set aside
-BATCH       <- NULL                 # batch / site / run column name, or NULL if none
-SCALE       <- "log2"               # "log2", "log10", "ln", "linear" or "auto" (a guess)
-POSITIVE    <- NULL                 # value of OUTCOME to code as 1 (NULL = automatic)
-QUICK       <- FALSE                # TRUE = faster but rougher; FALSE = fuller (about a minute on small data)
-SEED        <- 1                    # recorded in the report so results can be reproduced
-OUT_DIR     <- "audit_output"
-TITLE       <- "Audit: biomarker analysis"
+# Any setting you define BEFORE running this script (e.g. DATA_FILE <- "...") wins
+# over the default shown here, so you do not have to edit the file.
+cfg <- function(name, default) if (exists(name, envir = globalenv())) get(name, envir = globalenv()) else default
+DATA_FILE   <- cfg("DATA_FILE",  NULL)          # path to your .csv/.tsv/.xlsx, or NULL to choose a file
+OUTCOME     <- cfg("OUTCOME",    "Progress")    # column holding the 0/1 outcome (or two labels)
+ID_COLUMN   <- cfg("ID_COLUMN",  "PatientID")   # sample id column, or NULL
+COVARIATES  <- cfg("COVARIATES", c("Age", "Sex", "WBC", "BMI"))   # non-protein columns to set aside
+BATCH       <- cfg("BATCH",      NULL)          # batch / site / run column name, or NULL if none
+SCALE       <- cfg("SCALE",      "log2")        # "log2", "log10", "ln", "linear" or "auto" (a guess)
+POSITIVE    <- cfg("POSITIVE",   NULL)          # value of OUTCOME to code as 1 (NULL = automatic)
+QUICK       <- cfg("QUICK",      FALSE)         # TRUE = faster but rougher; FALSE = fuller (about a minute on small data)
+SEED        <- cfg("SEED",       1)             # recorded in the report so results can be reproduced
+OUT_DIR     <- cfg("OUT_DIR",    "audit_output")
+TITLE       <- cfg("TITLE",      "Audit: biomarker analysis")
 # -----------------------------------------------------------------------------
 
 say <- function(...) cat(sprintf("\n=== %s ===\n", paste0(...)))
